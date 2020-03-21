@@ -60,24 +60,6 @@ def main(args):
             name = config_metric.get('alias', config_metric.name)
             setattr(metric_fns, name, metric_fn)
 
-        logging.info('Create the optimizer.')
-        optimizer = _get_instance(torch.optim, config.optimizer, net.parameters())
-
-        if 'lr_scheduler' in config:
-            logging.info('Create the learning rate scheduler.')
-            lr_scheduler = _get_instance(torch.optim.lr_scheduler, config.lr_scheduler, optimizer)
-        else:
-            logging.info('Not using the learning rate scheduler.')
-            lr_scheduler = None
-
-        logging.info('Create the logger.')
-        config.logger.setdefault('kwargs', {}).update(log_dir=saved_dir / 'log',
-                                                      net=net)
-        logger = _get_instance(src.callbacks.loggers, config.logger)
-
-        logging.info('Create the monitor.')
-        config.monitor.setdefault('kwargs', {}).update(checkpoints_dir=saved_dir / 'checkpoints')
-        monitor = _get_instance(src.callbacks.monitor, config.monitor)
 
         logging.info('Create the trainer.')
         kwargs = {

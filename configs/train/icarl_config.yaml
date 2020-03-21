@@ -1,12 +1,17 @@
 main:
     random_seed: 0
-    saved_dir: '/home/peter850706/MedicalPro/models/acdc_seg/from_scratch/tmp'
+    saved_dir: '/home/tony/Incremental_Learning/models/tmp/'
+
+# load:
+#     loaded_path: 'path/to/checkpoint.pth'
+#     task_complete: 0
 
 learner:
     name: 'ICaRLLearner'
     kwargs:
         total_num_class: 100
         class_per_task: 20
+        exampler_size: 2000
         chosen_order: 0
 
 dataset:
@@ -36,34 +41,37 @@ net:
         out_channels: 4
 
 losses:
-    - name: 'CrossEntropyLossWrapper'
-      alias: 'cross_entropy_loss'
-    - name: 'DiceLoss'
-      alias: 'dice_loss'
+    - name: 'CrossEntropyLoss'
+      weight: 1.0
 
 metrics:
-    - name: 'Dice'
-      alias: 'dice'
+    - name: 'Accuracy'
 
 optimizer:
     name: 'Adam'
     kwargs:
-        lr: 0.001
+        lr: 2.0
+
+lr_scheduler:
+    name: 'MultiStepLR'
+    kwargs:
+        milestones: [49, 63]
+        gamma: 0.2
 
 logger:
-    name: 'AcdcSegLogger'
+    name: 'ICaRLLogger'
 
 monitor:
     name: 'Monitor'
     kwargs:
         mode: 'min'
         target: 'loss'
-        saved_freq: 1000
+        saved_freq: 10
         early_stop: 0
 
 trainer:
-    name: 'AcdcSegTrainer'
+    name: 'ICaRLTrainer'
     kwargs:
         device: 'cuda:0'
-        num_epochs: 10000
-        valid_freq: 10
+        num_epochs: 70
+        valid_freq: 1

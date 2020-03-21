@@ -16,7 +16,7 @@ class Monitor:
             (default: 0, do not early stop the training). Notice that the unit is validation times, not epoch.
     """
 
-    def __init__(self, checkpoints_dir, mode='min', target='loss', saved_freq=1, early_stop=0):
+    def __init__(self, checkpoints_dir, mode='min', target='loss', saved_freq=1, early_stop=0, add_epoch=0):
         self.checkpoints_dir = checkpoints_dir
         if mode not in ['min', 'max']:
             raise ValueError(f"The mode should be 'min' or 'max'. Got {mode}.")
@@ -26,6 +26,7 @@ class Monitor:
         self.early_stop = math.inf if early_stop == 0 else early_stop
         self.best = -math.inf if self.mode == 'max' else math.inf
         self.not_improved_count = 0
+        self.add_epoch = add_epoch
 
         if not self.checkpoints_dir.is_dir():
             self.checkpoints_dir.mkdir(parents=True)
@@ -38,6 +39,8 @@ class Monitor:
         Returns:
             path (Path): The path to save the model checkpoint.
         """
+        epoch += self.add_epoch
+        
         if epoch % self.saved_freq == 0:
             return self.checkpoints_dir / f'model_{epoch}.pth'
         else:

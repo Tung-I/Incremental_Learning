@@ -45,11 +45,6 @@ class BaseTrainer:
         self.metric_fns = metric_fns
         self.optimizer = optimizer
 
-        # if isinstance(lr_scheduler, ReduceLROnPlateau):
-        #     raise ValueError(f'Do not support {ReduceLROnPlateau} scheduler yet.')
-        # self.lr_scheduler = lr_scheduler
-        if isinstance(lr_scheduler, torch.optim.lr_scheduler.CyclicLR):
-            raise NotImplementedError('Do not support torch.optim.lr_scheduler.CyclicLR scheduler yet.')
         self.lr_scheduler = lr_scheduler
 
         self.logger = logger

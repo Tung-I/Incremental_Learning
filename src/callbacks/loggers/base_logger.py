@@ -9,7 +9,7 @@ class BaseLogger:
         dummy_input (torch.Tensor): The dummy input for plotting the network architecture.
     """
 
-    def __init__(self, log_dir, net, dummy_input=None):
+    def __init__(self, log_dir, net, dummy_input=None, add_epoch=0):
         """
         # TODO: Plot the network architecture.
         # There are some errors: ONNX runtime errors.
@@ -17,6 +17,7 @@ class BaseLogger:
             w.add_graph(net, dummy_input)
         """
         self.writer = SummaryWriter(log_dir)
+        self.add_epoch = add_epoch
 
     def write(self, epoch, train_log, train_batch, train_outputs,
               valid_log=None, valid_batch=None, valid_outputs=None):
@@ -30,6 +31,8 @@ class BaseLogger:
             valid_batch (dict or sequence): The validation batch.
             valid_outputs (torch.Tensor or sequence of torch.Tensor): The validation outputs.
         """
+        epoch += self.add_epoch
+        
         self._add_scalars(epoch, train_log, valid_log)
         self._add_images(epoch, train_batch, train_outputs, valid_batch, valid_outputs)
 
@@ -45,6 +48,8 @@ class BaseLogger:
             train_log (dict): The training log information.
             valid_log (dict): The validation log information.
         """
+        epoch += self.add_epoch
+
         if valid_log is None:
             for key in train_log.keys():
                 self.writer.add_scalars(key, {'train': train_log[key]}, epoch)
