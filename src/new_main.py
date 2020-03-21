@@ -21,16 +21,6 @@ def main(args):
     copyfile(args.config_path, saved_dir / 'config.yaml')
 
     if not args.test:
-        if config.trainer.kwargs.get('use_amp', False):
-            try:
-                from apex import amp  # noqa
-            except ImportError:
-                logging.error('The AMP training is not available. Please set the use_amp to false.')
-                raise
-            else:
-                logging.info('Using the AMP training.')
-        else:
-            logging.info('Not using the AMP training.')
 
         random_seed = config.main.get('random_seed')
         if random_seed is None:
@@ -48,31 +38,6 @@ def main(args):
         if 'cuda' in config.trainer.kwargs.device and not torch.cuda.is_available():
             raise ValueError("The cuda is not available. Please set the device to 'cpu'.")
         device = torch.device(config.trainer.kwargs.device)
-
-        logging.info('Create the training and validation datasets.')
-        config.dataset.setdefault('kwargs', {}).update(type_='train')
-        train_dataset = _get_instance(src.data.datasets, config.dataset)
-        config.dataset.setdefault('kwargs', {}).update(type_='valid')
-        valid_dataset = _get_instance(src.data.datasets, config.dataset)
-
-        logging.info('Create the training and validation dataloaders.')
-        cls = getattr(src.data.datasets, config.dataset.name)
-        sampler = getattr(cls, 'sampler', None)
-        batch_sampler = getattr(cls, 'batch_sampler', None)
-        collate_fn = getattr(cls, 'collate_fn', None)
-        worker_init_fn = getattr(cls, 'worker_init_fn', None)
-        config.dataloader.setdefault('kwargs', {}).update(sampler=sampler,
-                                                          batch_sampler=batch_sampler,
-                                                          collate_fn=collate_fn,
-                                                          worker_init_fn=worker_init_fn)
-        train_kwargs = config.dataloader.kwargs.pop('train', {})
-        valid_kwargs = config.dataloader.kwargs.pop('valid', {})
-        config_dataloader = copy.deepcopy(config.dataloader)
-        config_dataloader.kwargs.update(train_kwargs)
-        train_dataloader = _get_instance(src.data.dataloader, config_dataloader, train_dataset)
-        config_dataloader = copy.deepcopy(config.dataloader)
-        config_dataloader.kwargs.update(valid_kwargs)
-        valid_dataloader = _get_instance(src.data.dataloader, config_dataloader, valid_dataset)
 
         logging.info('Create the network architecture.')
         net = _get_instance(src.model.nets, config.net).to(device)
