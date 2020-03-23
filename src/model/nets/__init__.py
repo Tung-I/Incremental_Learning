@@ -1,8 +1,3 @@
 from .base_net import BaseNet
-from .models_genesis import ModelsGenesisSegNet, ModelsGenesisClfNet
-
-__all__ = [
-    'BaseNet',
-    'ModelsGenesisSegNet',
-    'ModelsGenesisClfNet',
-]
+from .icarl_net import ICaRLNet
+# from .models_genesis import ModelsGenesisSegNet, ModelsGenesisClfNet

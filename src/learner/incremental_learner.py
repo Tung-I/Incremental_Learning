@@ -12,15 +12,7 @@ LOGGER = logging.getLogger(__name__.split('.')[-1])
 
 class IncrementalLearner(abc.ABC):
     """The base incremental learner.
-    Methods should be implemented:
-        _train_task()
-        _eval_task()
-
-    Optional:
-        _before_task()
-        _after_task()
     """
-
     def __init__(self, config, saved_dir, total_num_class, class_per_task, chosen_order,
                  device, net, loss_fns, loss_weights, metric_fns, valid_freq=1):
         """
@@ -39,109 +31,94 @@ class IncrementalLearner(abc.ABC):
         self.current_num_class = 0  # number of seen classes
         self.test_class_index = []
 
+        # save the config of dataloaders
         self.train_kwargs = self.config.dataloader.kwargs.pop('train', {})
         self.valid_kwargs = self.config.dataloader.kwargs.pop('valid', {})
         self.test_kwargs = self.config.dataloader.kwargs.pop('test', {})
 
+        # objects which have been builded outside
         self.device = device
         self.net = net
         self.loss_fns = loss_fns
         self.loss_weights = loss_weights
         self.metric_fns = metric_fns
 
+        # objects which should be rebuilded inside
         self.optimizer = None
         self.lr_scheduler = None
         self.logger = None
         self.monitor = None
-        
-        self.num_epochs = self.config.trainer.get('num_epochs')
-        self.valid_freq = valid_freq
+        self.current_datasets = None
+        self.train_loader = None
+        self.valid_loader = None
+        self.test_loader = None
+        self.trainer = None
 
-        self.net_loaded_path = None
         # if the last learning stage was terminated
-        load_or_not = self.config.get('load')
-        if load_or_not is not None:
-            self.net_loaded_path = self.config.load.get('loaded_path')
-            task_complete = self.config.load.get('task_complete')
-            for i in range(task_complete):
-                self._before_task()
-            LOGGER.info('Resume learning.')
-            LOGGER.info(f'current task: {self.current_task + 1}, current classes: {self.current_num_class}')
+        self.net_loaded_path = None
+        self.load_task()
 
 
-    def before_task(self, train_loader, val_loader):
+    def before_task(self):
+        """
+        """
         LOGGER.info("Before Task:")
+        # update info
+        self.current_task += 1
+        self.current_num_class += self.calss_per_task
+        # rebuild objects for current task
+        self.optimizer = self.build_optimizer(self.config, self.net)
+        self.lr_scheduler = self.build_scheduler(self.config, self.optimizer)
+        _add_epoch = self.current_task * self.config.trainer.get('num_epochs')
+        self.logger = self.build_logger(self.config, self.saved_dir, self.net, _add_epoch)
+        self.monitor = self.build_monitor(self.config, self.saved_dir, _add_epoch)
+        # rebuild the datasets, loaders and trainer
+        self.current_datasets, self.test_class_index = self.build_dataset(self.config, self.current_task, self.class_per_task, self.test_class_index)
+        self.train_loader = self.build_dataloader(self.config, self.current_datasets, 'train')
+        self.valid_loader = self.build_dataloader(self.config, self.current_datasets, 'valid')
+        self.test_loader = self.build_dataloader(self.config, self.current_datasets, 'test')
+        self.trainer = self.build_trainer(self.config, self.current_datasets, self.device, self.train_loader, self.valid_loader, self.net, 
+                                        self.loss_fns, self.loss_weights, self.metric_fns, self.optimizer, self.lr_scheduler, self.logger, self.monitor)
+        # customized
         self._before_task()
-
-        LOGGER.info('Create the optimizer.')
-        self.optimizer = _get_instance(torch.optim, self.config.optimizer, self.net.parameters())
-
-        if 'lr_scheduler' in self.config:
-            LOGGER.info('Create the learning rate scheduler.')
-            self.lr_scheduler = _get_instance(torch.optim.lr_scheduler, self.config.lr_scheduler, self.optimizer)
-        else:
-            LOGGER.info('Not using the learning rate scheduler.')
-            self.lr_scheduler = None
-
-        logging.info('Create the logger.')
-        self.config.logger.setdefault('kwargs', {}).update(log_dir=self.saved_dir / 'log', net=self.net)
-        self.config.logger.setdefault('kwargs', {}).update(add_epoch=(self.current_task * self.num_epochs))
-        self.logger = _get_instance(src.callbacks.loggers, self.config.logger)
-
-        logging.info('Create the monitor.')
-        self.config.monitor.setdefault('kwargs', {}).update(checkpoints_dir=self.saved_dir / 'checkpoints')
-        self.config.monitor.setdefault('kwargs', {}).update(add_epoch=(self.current_task * self.num_epochs))
-        self.monitor = _get_instance(src.callbacks.monitor, self.config.monitor)
-
 
     def train_task(self):
         LOGGER.info("Training:")
-        self._train_task()
+        self._train_task(self.trainer)
 
     def after_task(self, inc_dataset):
         LOGGER.info("After Task:")
-        self._after_task(inc_dataset)
+        self._after_task()
 
     def eval_task(self, data_loader):
         LOGGER.info("Evaluation:")
-        return self._eval_task(data_loader)
+        test_loader = self.build_dataloader(self.current_dataset, 'test')
+        self._eval_task()
 
-    def _before_task(self, data_loader):
-        pass
-
-    def _train_task(self, train_loader, val_loader):
-        raise NotImplementedError
-
-    def _after_task(self, data_loader):
-        pass
-
-    def _eval_task(self, data_loader):
-        raise NotImplementedError
-
-    def build_dataset(self):
+    def build_dataset(self, config, current_task, class_per_task, test_class_index):
         """ To build 3 different datasets and return a dict of these datasets
         """
-        chosen_class_index = self.get_current_class_index(self.current_task*self.class_per_task, self.class_per_task)
-        self.test_class_index += chosen_class_index
-        self.test_class_index = list(set(self.test_class_index))
+        chosen_class_index = self.get_current_class_index(current_task*class_per_task, class_per_task)
+        test_class_index += chosen_class_index
+        test_class_index = list(set(test_class_index))
 
         LOGGER.info('Create the datasets.')
 
-        self.config.dataset.setdefault('kwargs', {}).update(type_='Training')
-        self.config.dataset.setdefault('kwargs', {}).update(chosen_index=chosen_class_index)
-        train_dataset = _get_instance(src.data.datasets, self.config.dataset)
+        config.dataset.setdefault('kwargs', {}).update(type_='Training')
+        config.dataset.setdefault('kwargs', {}).update(chosen_index=chosen_class_index)
+        train_dataset = _get_instance(src.data.datasets, config.dataset)
 
-        self.config.dataset.setdefault('kwargs', {}).update(type_='Validation')
-        self.config.dataset.setdefault('kwargs', {}).update(chosen_index=chosen_class_index)
-        valid_dataset = _get_instance(src.data.datasets, self.config.dataset)
+        config.dataset.setdefault('kwargs', {}).update(type_='Validation')
+        config.dataset.setdefault('kwargs', {}).update(chosen_index=chosen_class_index)
+        valid_dataset = _get_instance(src.data.datasets, config.dataset)
 
-        self.config.dataset.setdefault('kwargs', {}).update(type_='Testing')
-        self.config.dataset.setdefault('kwargs', {}).update(chosen_index=self.test_class_index)
-        test_dataset = _get_instance(src.data.datasets, self.config.dataset)
+        config.dataset.setdefault('kwargs', {}).update(type_='Testing')
+        config.dataset.setdefault('kwargs', {}).update(chosen_index=test_class_index)
+        test_dataset = _get_instance(src.data.datasets, config.dataset)
 
-        return {'train':train_dataset, 'valid':valid_dataset, 'test':test_dataset}
+        return {'train':train_dataset, 'valid':valid_dataset, 'test':test_dataset}, test_class_index
 
-    def build_dataloader(self, dataset, dataset_type):
+    def build_dataloader(self, config, dataset, dataset_type):
         """
         """
         dataset = dataset[dataset_type]
@@ -155,10 +132,65 @@ class IncrementalLearner(abc.ABC):
         else :
             loader_kwargs = self.test_kwargs
 
-        config_dataloader = copy.deepcopy(self.config.dataloader)
+        config_dataloader = copy.deepcopy(config.dataloader)
         config_dataloader.kwargs.update(loader_kwargs)
         dataloader = _get_instance(src.data.dataloader, config_dataloader, dataset)
         return dataloader
+
+    def build_optimizer(self, config, net):
+        LOGGER.info('Create the optimizer.')
+        optimizer = _get_instance(torch.optim, config.optimizer, net.parameters())
+        return optimizer
+
+    def build_scheduler(self, config, optimizer):
+        LOGGER.info('Create the lr scheduler.')
+        if 'lr_scheduler' in config:
+            LOGGER.info('Create the learning rate scheduler.')
+            lr_scheduler = _get_instance(torch.optim.lr_scheduler, config.lr_scheduler, optimizer)
+        else:
+            LOGGER.info('Not using the learning rate scheduler.')
+            lr_scheduler = None
+        return lr_scheduler
+
+    def build_logger(self, config, saved_dir, _net, _add_epoch):
+        LOGGER.info('Create the logger.')
+        config.logger.setdefault('kwargs', {}).update(log_dir=(saved_dir / 'log'), net=_net)
+        config.logger.setdefault('kwargs', {}).update(add_epoch=_add_epoch)
+        logger = _get_instance(src.callbacks.loggers, config.logger)
+        return logger
+
+    def build_monitor(self, config, saved_dir, _add_epoch):
+        LOGGER.info('Create the monitor.')
+        config.monitor.setdefault('kwargs', {}).update(checkpoints_dir=(saved_dir / 'checkpoints'))
+        config.monitor.setdefault('kwargs', {}).update(add_epoch=add_epoch)
+        monitor = _get_instance(src.callbacks.monitor, config.monitor)
+        return monitor
+
+    def build_trainer(self, config, dataset, device, train_laoder, valid_loader, net, loss_fns, 
+                    loss_weights, metric_fns, optimizer, lr_scheduler, logger, monitor):
+        LOGGER.info(f'Create the trainer of the task.')
+
+        kwargs = {
+            'device': device,
+            'train_dataloader': train_loader,
+            'valid_dataloader': valid_loader,
+            'net': net,
+            'loss_fns': loss_fns,
+            'loss_weights': loss_weights,
+            'metric_fns': metric_fns,
+            'optimizer': optimizer,
+            'lr_scheduler': lr_scheduler,
+            'logger': logger,
+            'monitor': monitor
+        }
+        config.trainer.kwargs.update(kwargs)
+        trainer = _get_instance(src.runner.trainers, config.trainer)
+        # if the parameters of net should be loaded
+        if self.net_loaded_path is not None:
+            logging.info(f'Load the previous checkpoint from "{self.net_loaded_path}".')
+            trainer.load(Path(self.net_loaded_path))
+            logging.info('Resume training.')
+        return trainer
 
     def get_current_class_index(self, _start, class_per_task):
         _end = _start + class_per_task
@@ -185,15 +217,29 @@ class IncrementalLearner(abc.ABC):
         else:
             return class_order[order_num]
 
+    def load_task(self):
+        load_or_not = self.config.get('load')
+        if load_or_not is not None:
+            self.net_loaded_path = self.config.load.get('loaded_path')
+            task_complete = self.config.load.get('task_complete')
+            for i in range(task_complete):
+                self._before_task()
+            LOGGER.info('Resume learning.')
+            LOGGER.info(f'current task: {self.current_task + 1}, current classes: {self.current_num_class}')
+
+    def _before_task(self, data_loader):
+        raise NotImplementedError
+
+    def _train_task(self, train_loader, val_loader):
+        raise NotImplementedError
+
+    def _after_task(self, data_loader):
+        raise NotImplementedError
+
+    def _eval_task(self, data_loader):
+        raise NotImplementedError
+
 
 def _get_instance(module, config, *args):
-    """
-    Args:
-        module (MyClass): The defined module (class).
-        config (Box): The config to create the class instance.
-
-    Returns:
-        instance (MyClass): The defined class instance.
-    """
     cls = getattr(module, config.name)
     return cls(*args, **config.get('kwargs', {}))

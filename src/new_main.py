@@ -61,32 +61,7 @@ def main(args):
             setattr(metric_fns, name, metric_fn)
 
 
-        logging.info('Create the trainer.')
-        kwargs = {
-            'device': device,
-            'train_dataloader': train_dataloader,
-            'valid_dataloader': valid_dataloader,
-            'net': net,
-            'loss_fns': loss_fns,
-            'loss_weights': loss_weights,
-            'metric_fns': metric_fns,
-            'optimizer': optimizer,
-            'lr_scheduler': lr_scheduler,
-            'logger': logger,
-            'monitor': monitor
-        }
-        config.trainer.kwargs.update(kwargs)
-        trainer = _get_instance(src.runner.trainers, config.trainer)
 
-        loaded_path = config.main.get('loaded_path')
-        if loaded_path is None:
-            logging.info('Start training.')
-        else:
-            logging.info(f'Load the previous checkpoint from "{loaded_path}".')
-            trainer.load(Path(loaded_path))
-            logging.info('Resume training.')
-        trainer.train()
-        logging.info('End training.')
     else:
         logging.info('Create the device.')
         if 'cuda' in config.predictor.kwargs.device and not torch.cuda.is_available():
