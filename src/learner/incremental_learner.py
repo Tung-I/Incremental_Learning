@@ -14,7 +14,7 @@ class IncrementalLearner(abc.ABC):
     """The base incremental learner.
     """
     def __init__(self, config, saved_dir, total_num_class, class_per_task, chosen_order,
-                 device, net, loss_fns, loss_weights, metric_fns, valid_freq=1):
+                 device, net, loss_fns, loss_weights, metric_fns):
         """
         Args:
             data_dir (pathlib): path of data folders.
@@ -30,6 +30,7 @@ class IncrementalLearner(abc.ABC):
         self.current_task = -1  # current step of task
         self.current_num_class = 0  # number of seen classes
         self.test_class_index = []
+        self.test_class_label = []
 
         # save the config of dataloaders
         self.train_kwargs = self.config.dataloader.kwargs.pop('train', {})
@@ -58,6 +59,21 @@ class IncrementalLearner(abc.ABC):
         self.net_loaded_path = None
         self.load_task()
 
+        # for calculating distillation loss
+        self.old_model = None
+
+        # for trainer
+        self.meta_data = {}
+
+    def learn(self):
+        LOGGER.info("Start incremental learning.")
+        for i in range(self.total_num_task):
+            LOGGER.info(f'Start task: {self.current_task + 2}')
+            self.before_task()
+            self.train_task()
+            self.after_task()
+            self.eval_task()
+            LOGGER.info(f'End task: {self.current_task + 1}')
 
     def before_task(self):
         """
@@ -66,57 +82,69 @@ class IncrementalLearner(abc.ABC):
         # update info
         self.current_task += 1
         self.current_num_class += self.calss_per_task
+        # expand the net (before creating optimizer)
+        self.net.add_classes(self.class_per_task)
         # rebuild objects for current task
         self.optimizer = self.build_optimizer(self.config, self.net)
         self.lr_scheduler = self.build_scheduler(self.config, self.optimizer)
         _add_epoch = self.current_task * self.config.trainer.get('num_epochs')
         self.logger = self.build_logger(self.config, self.saved_dir, self.net, _add_epoch)
         self.monitor = self.build_monitor(self.config, self.saved_dir, _add_epoch)
-        # rebuild the datasets, loaders and trainer
-        self.current_datasets, self.test_class_index = self.build_dataset(self.config, self.current_task, self.class_per_task, self.test_class_index)
+        # rebuild the datasets, loaders
+        self.current_datasets, self.test_class_index, self.test_class_label = 
+            self.build_dataset(self.config, self.current_task, self.current_num_class, self.class_per_task, self.test_class_index, self.test_class_label)
         self.train_loader = self.build_dataloader(self.config, self.current_datasets, 'train')
         self.valid_loader = self.build_dataloader(self.config, self.current_datasets, 'valid')
         self.test_loader = self.build_dataloader(self.config, self.current_datasets, 'test')
+        # rebuild the trainer
+        self.meta_data['old_model'] = self.old_model
+        self.meta_data['class_per_task'] = self.class_per_task
         self.trainer = self.build_trainer(self.config, self.current_datasets, self.device, self.train_loader, self.valid_loader, self.net, 
-                                        self.loss_fns, self.loss_weights, self.metric_fns, self.optimizer, self.lr_scheduler, self.logger, self.monitor)
+                                        self.loss_fns, self.loss_weights, self.metric_fns, self.optimizer, self.lr_scheduler, self.logger, self.monitor,
+                                        self.meta_data)
         # customized
         self._before_task()
 
     def train_task(self):
         LOGGER.info("Training:")
-        self._train_task(self.trainer)
+        self._train_task()
+        LOGGER.info(f'End training of task{self.current_task + 1}.')
 
-    def after_task(self, inc_dataset):
+    def after_task(self):
         LOGGER.info("After Task:")
         self._after_task()
 
-    def eval_task(self, data_loader):
+    def eval_task(self):
         LOGGER.info("Evaluation:")
         test_loader = self.build_dataloader(self.current_dataset, 'test')
         self._eval_task()
 
-    def build_dataset(self, config, current_task, class_per_task, test_class_index):
+    def build_dataset(self, config, current_task, current_num_class, class_per_task, test_class_index):
         """ To build 3 different datasets and return a dict of these datasets
         """
         chosen_class_index = self.get_current_class_index(current_task*class_per_task, class_per_task)
+        chosen_class_label = list(range(current_num_class - class_per_task, curren_num_class))
         test_class_index += chosen_class_index
-        test_class_index = list(set(test_class_index))
+        test_class_label += chosen_class_label
 
         LOGGER.info('Create the datasets.')
 
         config.dataset.setdefault('kwargs', {}).update(type_='Training')
         config.dataset.setdefault('kwargs', {}).update(chosen_index=chosen_class_index)
+        config.dataset.setdefault('kwargs', {}).update(chosen_label=chosen_class_label)
         train_dataset = _get_instance(src.data.datasets, config.dataset)
 
         config.dataset.setdefault('kwargs', {}).update(type_='Validation')
         config.dataset.setdefault('kwargs', {}).update(chosen_index=chosen_class_index)
+        config.dataset.setdefault('kwargs', {}).update(chosen_label=chosen_class_label)
         valid_dataset = _get_instance(src.data.datasets, config.dataset)
 
         config.dataset.setdefault('kwargs', {}).update(type_='Testing')
         config.dataset.setdefault('kwargs', {}).update(chosen_index=test_class_index)
+        config.dataset.setdefault('kwargs', {}).update(chosen_label=test_class_label)
         test_dataset = _get_instance(src.data.datasets, config.dataset)
 
-        return {'train':train_dataset, 'valid':valid_dataset, 'test':test_dataset}, test_class_index
+        return {'train':train_dataset, 'valid':valid_dataset, 'test':test_dataset}, test_class_index, test_class_label
 
     def build_dataloader(self, config, dataset, dataset_type):
         """
@@ -167,7 +195,7 @@ class IncrementalLearner(abc.ABC):
         return monitor
 
     def build_trainer(self, config, dataset, device, train_laoder, valid_loader, net, loss_fns, 
-                    loss_weights, metric_fns, optimizer, lr_scheduler, logger, monitor):
+                    loss_weights, metric_fns, optimizer, lr_scheduler, logger, monitor, meta_data):
         LOGGER.info(f'Create the trainer of the task.')
 
         kwargs = {
@@ -181,7 +209,8 @@ class IncrementalLearner(abc.ABC):
             'optimizer': optimizer,
             'lr_scheduler': lr_scheduler,
             'logger': logger,
-            'monitor': monitor
+            'monitor': monitor,
+            'meta_data': meta_data
         }
         config.trainer.kwargs.update(kwargs)
         trainer = _get_instance(src.runner.trainers, config.trainer)

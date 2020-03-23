@@ -9,20 +9,17 @@ from src.model.nets import BaseNet
 
 class ICaRLNet(BaseNet):
 
-    def __init__(self, net_type, use_bias=False, init_type="kaiming", use_multi_fc=False, device=None):
+    def __init__(self, convnet_type, use_bias=False, init="kaiming", use_multi_fc=False, device=None):
         super().__init__()
-        self.net_type = net_type
+
         self.use_bias = use_bias
-        self.init_type = init_type
+        self.init = init
         self.use_multi_fc = use_multi_fc
-        self.convnet = get_convnet(net_type, nf=64, zero_init_residual=True)
 
-
+        self.convnet = get_convnet(convnet_type, nf=64, zero_init_residual=True)
         self.classifier = None
         self.n_classes = 0
         self.device = device
-
-        self.to(self.device)
 
     def forward(self, x):
         if self.classifier is None:
@@ -92,7 +89,7 @@ class ICaRLNet(BaseNet):
 
     def _gen_classifier(self, n_classes):
         classifier = nn.Linear(self.convnet.out_dim, n_classes, bias=self.use_bias).to(self.device)
-        if self.init_type == "kaiming":
+        if self.init == "kaiming":
             nn.init.kaiming_normal_(classifier.weight, nonlinearity="linear")
         if self.use_bias:
             nn.init.constant_(classifier.bias, 0.)

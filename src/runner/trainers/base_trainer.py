@@ -33,8 +33,8 @@ class BaseTrainer:
     """
 
     def __init__(self, device, train_dataloader, valid_dataloader,
-                 net, loss_fns, loss_weights, metric_fns, optimizer,
-                 lr_scheduler, logger, monitor, num_epochs,
+                 net, loss_fns, loss_weights, metric_fns, optimizer, 
+                 lr_scheduler, logger, monitor, num_epochs, meta_data=None, 
                  valid_freq=1, opt_level='O1'):
         self.device = device
         self.train_dataloader = train_dataloader
@@ -53,6 +53,8 @@ class BaseTrainer:
         self.valid_freq = valid_freq
         self.epoch = 1
 
+        self.meta_data = meta_data
+
 
     def train(self):
         """The training process.
@@ -68,11 +70,8 @@ class BaseTrainer:
             else:
                 valid_log, valid_batch, valid_outputs = None, None, None
 
-            # # Adjust the learning rate.
-            # if (self.lr_scheduler is not None
-            #         and not isinstance(self.lr_scheduler, (CyclicLR, OneCycleLR, CosineAnnealingWarmRestarts))):
-            #     self.lr_scheduler.step()
-             # Adjust the learning rate.
+
+            # Adjust the learning rate.
             if self.lr_scheduler is None:
                 pass
             elif isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau) and mode == 'validation':
@@ -138,7 +137,7 @@ class BaseTrainer:
             epoch_log = EpochLog()
             for i in range(len(dataloader)):
                 batch = next(dataloader_iterator)
-                train_dict = self._train_step(batch)
+                train_dict = self._train_step(batch, self.meta_data)
                 loss = train_dict['loss']
                 losses = train_dict.get('losses')
                 metrics = train_dict.get('metrics')
@@ -173,7 +172,7 @@ class BaseTrainer:
             epoch_log = EpochLog()
             for i, batch in enumerate(pbar):
                 with torch.no_grad():
-                    valid_dict = self._valid_step(batch)
+                    valid_dict = self._valid_step(batch, self.meta_data)
                     loss = valid_dict['loss']
                     losses = valid_dict.get('losses')
                     metrics = valid_dict.get('metrics')
@@ -189,7 +188,7 @@ class BaseTrainer:
                 pbar.set_postfix(**epoch_log.on_step_end_log)
         return epoch_log.on_epoch_end_log, batch, outputs
 
-    def _train_step(self, batch):
+    def _train_step(self, batch, meta_data):
         """The user-defined training logic.
         Args:
             batch (dict or sequence): A batch of the data.
@@ -203,7 +202,7 @@ class BaseTrainer:
         """
         raise NotImplementedError
 
-    def _valid_step(self, batch):
+    def _valid_step(self, batch, meta_data):
         """The user-defined validation logic.
         Args:
             batch (dict or sequence): A batch of the data.

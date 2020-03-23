@@ -40,6 +40,7 @@ def main(args):
         device = torch.device(config.trainer.kwargs.device)
 
         logging.info('Create the network architecture.')
+        config.net.setdefault('kwargs', {}).update(device=device)
         net = _get_instance(src.model.nets, config.net).to(device)
 
         logging.info('Create the loss functions and corresponding weights.')
@@ -54,92 +55,30 @@ def main(args):
             loss_weights.append(config_loss.weight)
 
         logging.info('Create the metric functions.')
-        metric_fns = MetricFns()
-        for config_metric in config.metrics:
-            metric_fn = _get_instance(src.model.metrics, config_metric).to(device)
-            name = config_metric.get('alias', config_metric.name)
-            setattr(metric_fns, name, metric_fn)
+        metric_fns = [_get_instance(src.model.metrics, config_metric) for config_metric in config.metrics]
 
-
-
-    else:
-        logging.info('Create the device.')
-        if 'cuda' in config.predictor.kwargs.device and not torch.cuda.is_available():
-            raise ValueError("The cuda is not available. Please set the device to 'cpu'.")
-        device = torch.device(config.predictor.kwargs.device)
-
-        logging.info('Create the testing dataset.')
-        config.dataset.setdefault('kwargs', {}).update(type_='test')
-        test_dataset = _get_instance(src.data.datasets, config.dataset)
-
-        logging.info('Create the testing dataloader.')
-        cls = getattr(src.data.datasets, config.dataset.name)
-        sampler = getattr(cls, 'sampler', None)
-        batch_sampler = getattr(cls, 'batch_sampler', None)
-        collate_fn = getattr(cls, 'collate_fn', None)
-        worker_init_fn = getattr(cls, 'worker_init_fn', None)
-        config.dataloader.setdefault('kwargs', {}).update(sampler=sampler,
-                                                          batch_sampler=batch_sampler,
-                                                          collate_fn=collate_fn,
-                                                          worker_init_fn=worker_init_fn)
-        test_dataloader = _get_instance(src.data.dataloader, config.dataloader, test_dataset)
-
-        logging.info('Create the network architecture.')
-        net = _get_instance(src.model.nets, config.net).to(device)
-
-        logging.info('Create the loss functions and corresponding weights.')
-        loss_fns, loss_weights = LossFns(), LossWeights()
-        defaulted_loss_fns = tuple(loss_fn for loss_fn in dir(torch.nn) if 'Loss' in loss_fn)
-        for config_loss in config.losses:
-            if config_loss.name in defaulted_loss_fns:
-                loss_fn = _get_instance(torch.nn, config_loss).to(device)
-            else:
-                loss_fn = _get_instance(src.model.losses, config_loss).to(device)
-            loss_weight = config_loss.get('weight', 1 / len(config.losses))
-            name = config_loss.get('alias', config_loss.name)
-            setattr(loss_fns, name, loss_fn)
-            setattr(loss_weights, name, loss_weight)
-
-        logging.info('Create the metric functions.')
-        metric_fns = MetricFns()
-        for config_metric in config.metrics:
-            metric_fn = _get_instance(src.model.metrics, config_metric).to(device)
-            name = config_metric.get('alias', config_metric.name)
-            setattr(metric_fns, name, metric_fn)
-
-        logging.info('Create the predictor.')
+        logging.info('Create the learner.')
         kwargs = {
-            'saved_dir': saved_dir,
+            'config': config
+            'saved_dir': saved_dir
             'device': device,
-            'test_dataloader': test_dataloader,
             'net': net,
             'loss_fns': loss_fns,
             'loss_weights': loss_weights,
-            'metric_fns': metric_fns
+            'metric_fns': metric_fns,
         }
-        config.predictor.kwargs.update(kwargs)
-        predictor = _get_instance(src.runner.predictors, config.predictor)
+        config.learner.kwargs.update(kwargs)
+        learner = _get_instance(src.learner, config.learner)
 
-        loaded_path = config.main.loaded_path
-        logging.info(f'Load the previous checkpoint from "{loaded_path}".')
-        predictor.load(Path(loaded_path))
-        logging.info('Start testing.')
-        predictor.predict()
-        logging.info('End testing.')
+        learner.learn()
 
 
 class Base:
     """The Base class for easy debugging.
     """
-
     def __getattr__(self, name):
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'. "
                              f"Its attributes: {list(self.__dict__.keys())}.")
-
-
-LossFns = type('LossFns', (Base,), {})
-LossWeights = type('LossWeights', (Base,), {})
-MetricFns = type('MetricFns', (Base,), {})
 
 
 def _parse_args():
