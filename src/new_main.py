@@ -59,8 +59,8 @@ def main(args):
 
         logging.info('Create the learner.')
         kwargs = {
-            'config': config
-            'saved_dir': saved_dir
+            'config': config,
+            'saved_dir': saved_dir,
             'device': device,
             'net': net,
             'loss_fns': loss_fns,

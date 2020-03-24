@@ -7,27 +7,29 @@ class ICaRLTrainer(BaseTrainer):
     """The ICaRL trainer for the segmentation task.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, meta_data=None, **kwargs):
         super().__init__(**kwargs)
+        self.meta_data = meta_data
 
-    def _train_step(self, batch, meta_data):
+    def _train_step(self, batch):
         inputs, targets = batch['inputs'].to(self.device), batch['targets'].to(self.device)
         outputs = self.net(inputs)
         # one hot encoding
         targets = torch.zeros_like(outputs).scatter_(1, targets, 1.) # (N, C)
 
-        old_model = meta_data['old_model']
-        class_per_task = meta_data['class_per_task']
+        old_model = self.meta_data['old_model']
+        class_per_task = self.meta_data['class_per_task']
 
-        if old_model is None
+        if old_model is None:
             losses = [loss(outputs, targets) for loss in self.loss_fns]
-        else
+        else:
             old_targets = torch.sigmoid(old_model(inputs).detach())
             new_targets = targets.clone()
             new_targets[..., :-class_per_task] = old_targets
             losses = [loss(outputs, new_targets) for loss in self.loss_fns]
 
         metrics = [metric(outputs, targets) for metric in self.metric_fns]
+        # metrics = [0]
 
         loss = (torch.stack(losses) * self.loss_weights).sum()
 
@@ -38,24 +40,25 @@ class ICaRLTrainer(BaseTrainer):
             'outputs': outputs
         }
 
-    def _valid_step(self, batch, meta_data):
+    def _valid_step(self, batch):
         inputs, targets = batch['inputs'].to(self.device), batch['targets'].to(self.device)
         outputs = self.net(inputs)
         # one hot encoding
         targets = torch.zeros_like(outputs).scatter_(1, targets, 1.) # (N, C)
 
-        old_model = meta_data['old_model']
-        class_per_task = meta_data['class_per_task']
+        old_model = self.meta_data['old_model']
+        class_per_task = self.meta_data['class_per_task']
         
-        if old_model is None
+        if old_model is None:
             losses = [loss(outputs, targets) for loss in self.loss_fns]
-        else
+        else:
             old_targets = torch.sigmoid(old_model(inputs).detach())
             new_targets = targets.clone()
             new_targets[..., :-class_per_task] = old_targets
             losses = [loss(outputs, new_targets) for loss in self.loss_fns]
-            
+
         metrics = [metric(outputs, targets) for metric in self.metric_fns]
+        # metrics = [0]
 
         loss = (torch.stack(losses) * self.loss_weights).sum()
 

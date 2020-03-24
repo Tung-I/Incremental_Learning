@@ -1,7 +1,9 @@
 import logging
 import copy
+import json
 from torch.nn import functional as F
 from tqdm import tqdm
+from scipy.spatial.distance import cdist
 
 from src.learner import IncrementalLearner
 
@@ -26,25 +28,30 @@ class ICaRLLearner(IncrementalLearner):
         self.size_per_class = 0  # how many image per class in the exampler
 
         self._examplars = {}
-        self._means = None
+        self._class_means = None
         self._herding_matrix = []
 
 
     def _before_task(self):
-        # update the info for exampler
+        # update the info for examplar
         self.size_per_class = self.exampler_size // self.current_num_class
 
     def _train_task(self, trainer):
         self.trainer.train()
 
     def _after_task(self):
-        self.build_examplars(self.current_dataset)
+        self.build_examplars()
         self.old_model = self.net.copy().freeze()
 
     def _eval_task(self):
-        ypred, ytrue = compute_accuracy(self._network, data_loader, self._class_means)
+        ypred, ytrue = compute_ypred_ytrue(self.net, self.test_loader, self._class_means)
+        all_acc = compute_accuracy(ypred, ytrue)
+        output_path = '/home/tony/Desktop/' + str(self.current_task) +'_output.json' 
+        with open(output_path, 'w') as output_json_file:
+            json.dump(all_acc, output_json_file)
         
     def build_examplars(self):
+        LOGGER.info('Build examplar')
         self._data_memory, self._targets_memory = [], []
         self._class_means = np.zeros((self.total_num_class, self.net.features_dim()))
 
@@ -129,6 +136,38 @@ class ICaRLLearner(IncrementalLearner):
         mean /= np.linalg.norm(mean)
 
         return mean, alph
+
+    def compute_ypred_ytrue(model, loader, class_means):
+        features, targets_ = extract_features(model, loader)
+
+        targets = np.zeros((targets_.shape[0], 100), np.float32)
+        targets[range(len(targets_)), targets_.astype('int32')] = 1.
+        features = (features.T / (np.linalg.norm(features.T, axis=0) + EPSILON)).T
+
+        # Compute score for iCaRL
+        sqd = cdist(class_means, features, 'sqeuclidean')
+        score_icarl = (-sqd).T
+
+        return np.argsort(score_icarl, axis=1)[:, -1], targets_
+
+    def compute_accuracy(ypred, ytrue):
+        task_size = self.class_per_task
+        all_acc = {}
+
+        all_acc["total"] = round((ypred == ytrue).sum() / len(ytrue), 3)
+
+        for class_id in range(0, np.max(ytrue), task_size):
+            idxes = np.where(
+                    np.logical_and(ytrue >= class_id, ytrue < class_id + task_size)
+            )[0]
+
+            label = "{}-{}".format(
+                    str(class_id).rjust(2, "0"),
+                    str(class_id + task_size - 1).rjust(2, "0")
+            )
+            all_acc[label] = round((ypred[idxes] == ytrue[idxes]).sum() / len(idxes), 3)
+
+        return all_acc
 
 
 def _get_instance(module, config, *args):

@@ -10,7 +10,7 @@ learner:
     name: 'ICaRLLearner'
     kwargs:
         total_num_class: 100
-        class_per_task: 20
+        class_per_task: 10
         exampler_size: 2000
         chosen_order: 0
 
@@ -26,11 +26,11 @@ dataloader:
     name: 'Dataloader'
     kwargs:
         train:
-            batch_size: 10
+            batch_size: 128
         valid:
-            batch_size: 10
+            batch_size: 128
         test:
-            batch_size: 10
+            batch_size: 128
         shuffle: true
         num_workers: 8
 

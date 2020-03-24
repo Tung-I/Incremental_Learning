@@ -29,6 +29,8 @@ class IncrementalLearner(abc.ABC):
         self.total_num_task = self.total_num_class // class_per_task
         self.current_task = -1  # current step of task
         self.current_num_class = 0  # number of seen classes
+        self.current_class_index = []
+        self.current_class_label = []
         self.test_class_index = []
         self.test_class_label = []
 
@@ -65,23 +67,13 @@ class IncrementalLearner(abc.ABC):
         # for trainer
         self.meta_data = {}
 
-    def learn(self):
-        LOGGER.info("Start incremental learning.")
-        for i in range(self.total_num_task):
-            LOGGER.info(f'Start task: {self.current_task + 2}')
-            self.before_task()
-            self.train_task()
-            self.after_task()
-            self.eval_task()
-            LOGGER.info(f'End task: {self.current_task + 1}')
-
     def before_task(self):
         """
         """
         LOGGER.info("Before Task:")
         # update info
         self.current_task += 1
-        self.current_num_class += self.calss_per_task
+        self.current_num_class += self.class_per_task
         # expand the net (before creating optimizer)
         self.net.add_classes(self.class_per_task)
         # rebuild objects for current task
@@ -91,8 +83,7 @@ class IncrementalLearner(abc.ABC):
         self.logger = self.build_logger(self.config, self.saved_dir, self.net, _add_epoch)
         self.monitor = self.build_monitor(self.config, self.saved_dir, _add_epoch)
         # rebuild the datasets, loaders
-        self.current_datasets, self.test_class_index, self.test_class_label = 
-            self.build_dataset(self.config, self.current_task, self.current_num_class, self.class_per_task, self.test_class_index, self.test_class_label)
+        self.current_datasets = self.build_dataset(self.config, self.current_task, self.class_per_task)
         self.train_loader = self.build_dataloader(self.config, self.current_datasets, 'train')
         self.valid_loader = self.build_dataloader(self.config, self.current_datasets, 'valid')
         self.test_loader = self.build_dataloader(self.config, self.current_datasets, 'test')
@@ -119,15 +110,17 @@ class IncrementalLearner(abc.ABC):
         test_loader = self.build_dataloader(self.current_dataset, 'test')
         self._eval_task()
 
-    def build_dataset(self, config, current_task, current_num_class, class_per_task, test_class_index):
+    def build_dataset(self, config, current_task, class_per_task):
         """ To build 3 different datasets and return a dict of these datasets
         """
-        chosen_class_index = self.get_current_class_index(current_task*class_per_task, class_per_task)
-        chosen_class_label = list(range(current_num_class - class_per_task, curren_num_class))
-        test_class_index += chosen_class_index
-        test_class_label += chosen_class_label
+        self.current_class_index, self.current_class_label = self.get_current_class_index_label(current_task*class_per_task, (current_task+1)*class_per_task)
+        self.test_class_index, self.test_class_label = self.get_current_class_index_label(0, (current_task+1)*class_per_task)
 
         LOGGER.info('Create the datasets.')
+        chosen_class_index = self.current_class_index
+        chosen_class_label = self.current_class_label
+        test_calss_index = self.test_class_index
+        test_class_label = self.test_class_label
 
         config.dataset.setdefault('kwargs', {}).update(type_='Training')
         config.dataset.setdefault('kwargs', {}).update(chosen_index=chosen_class_index)
@@ -135,8 +128,6 @@ class IncrementalLearner(abc.ABC):
         train_dataset = _get_instance(src.data.datasets, config.dataset)
 
         config.dataset.setdefault('kwargs', {}).update(type_='Validation')
-        config.dataset.setdefault('kwargs', {}).update(chosen_index=chosen_class_index)
-        config.dataset.setdefault('kwargs', {}).update(chosen_label=chosen_class_label)
         valid_dataset = _get_instance(src.data.datasets, config.dataset)
 
         config.dataset.setdefault('kwargs', {}).update(type_='Testing')
@@ -144,7 +135,7 @@ class IncrementalLearner(abc.ABC):
         config.dataset.setdefault('kwargs', {}).update(chosen_label=test_class_label)
         test_dataset = _get_instance(src.data.datasets, config.dataset)
 
-        return {'train':train_dataset, 'valid':valid_dataset, 'test':test_dataset}, test_class_index, test_class_label
+        return {'train':train_dataset, 'valid':valid_dataset, 'test':test_dataset}
 
     def build_dataloader(self, config, dataset, dataset_type):
         """
@@ -221,9 +212,8 @@ class IncrementalLearner(abc.ABC):
             logging.info('Resume training.')
         return trainer
 
-    def get_current_class_index(self, _start, class_per_task):
-        _end = _start + class_per_task
-        return self.class_order[_start:_end]
+    def get_current_class_index_label(self, _start, _end):
+        return self.class_order[_start:_end], list(range(_start, _end))
 
     def get_class_order(self, order_num):
         """Return a list of class (int)
@@ -267,6 +257,16 @@ class IncrementalLearner(abc.ABC):
 
     def _eval_task(self, data_loader):
         raise NotImplementedError
+
+    def learn(self):
+        LOGGER.info("Start incremental learning.")
+        for i in range(self.total_num_task):
+            LOGGER.info(f'Start task: {self.current_task + 2}')
+            self.before_task()
+            self.train_task()
+            self.after_task()
+            self.eval_task()
+            LOGGER.info(f'End task: {self.current_task + 1}')
 
 
 def _get_instance(module, config, *args):

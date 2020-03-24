@@ -1,11 +1,14 @@
 import copy
 import torch
-import resnet
-import densenet
 
 from torch import nn
 from src.model.nets import BaseNet
-
+# from src.model.nets import densenet121
+# from src.model.nets import resnet18
+# from src.model.nets import resnet34
+from src.model.nets import resnet, densenet
+# import src.model.nets.resnet
+# import src.model.nets.densenet
 
 class ICaRLNet(BaseNet):
 
