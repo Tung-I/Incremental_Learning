@@ -1,6 +1,6 @@
 main:
     random_seed: 0
-    saved_dir: '/home/tony/Incremental_Learning/models/tmp/'
+    saved_dir: '/home/tony/Incremental_Learning/models/icarl/'
 
 # load:
 #     loaded_path: 'path/to/checkpoint.pth'
@@ -37,13 +37,14 @@ dataloader:
 net:
     name: 'ICaRLNet'
     kwargs:
-        convnet_type: "resnet18"
+        convnet_type: "resnet34"
         use_bias: False
         init: "kaiming"
         use_multi_fc: False
+        pretrained: True
 
 losses:
-    - name: 'DistilledCrossEntropyLoss'
+    - name: 'MyBCELoss'
       weight: 1.0
 
 metrics:

@@ -3,6 +3,7 @@ import nibabel as nib
 import numpy as np
 import pandas as pd
 import csv
+import torch
 from pathlib import Path
 
 from src.data.datasets import BaseDataset
@@ -43,17 +44,22 @@ class IncrementalDataset(BaseDataset):
 
     def __getitem__(self, index):
         data_path, gt = self.data_paths[index]
-        img = np.load(data_path)
-        gt = np.asarray([gt])
+        img = np.load(data_path).astype(np.float32)
 
-        if self.type == 'train':
+        gt = torch.as_tensor(np.asarray([gt]).astype(np.int16))
+
+        if self.type == 'Training':
             transforms_kwargs = {}
-            img = self.transforms(img, **transforms_kwargs)
-            img = self.augments(img)
-            img, gt = self.to_tensor(img, gt)
+            img, = self.transforms(img, **transforms_kwargs)
+            img, = self.augments(img)
+            img, = self.to_tensor(img)
         else:
-            img, gt = self.to_tensor(img, gt)
+            transforms_kwargs = {}
+            img, = self.transforms(img, **transforms_kwargs)
+            img, = self.to_tensor(img)
 
+        img = img.permute(2, 0, 1).float().contiguous()
+        gt = gt.long().contiguous()
         return {'inputs':img, 'targets':gt}
 
     def __len__(self):

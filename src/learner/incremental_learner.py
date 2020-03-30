@@ -79,7 +79,7 @@ class IncrementalLearner(abc.ABC):
         # rebuild objects for current task
         self.optimizer = self.build_optimizer(self.config, self.net)
         self.lr_scheduler = self.build_scheduler(self.config, self.optimizer)
-        _add_epoch = self.current_task * self.config.trainer.get('num_epochs')
+        _add_epoch = self.current_task * self.config.trainer.kwargs.get('num_epochs')
         self.logger = self.build_logger(self.config, self.saved_dir, self.net, _add_epoch)
         self.monitor = self.build_monitor(self.config, self.saved_dir, _add_epoch)
         # rebuild the datasets, loaders
@@ -107,7 +107,6 @@ class IncrementalLearner(abc.ABC):
 
     def eval_task(self):
         LOGGER.info("Evaluation:")
-        test_loader = self.build_dataloader(self.current_dataset, 'test')
         self._eval_task()
 
     def build_dataset(self, config, current_task, class_per_task):
@@ -119,7 +118,7 @@ class IncrementalLearner(abc.ABC):
         LOGGER.info('Create the datasets.')
         chosen_class_index = self.current_class_index
         chosen_class_label = self.current_class_label
-        test_calss_index = self.test_class_index
+        test_class_index = self.test_class_index
         test_class_label = self.test_class_label
 
         config.dataset.setdefault('kwargs', {}).update(type_='Training')
@@ -181,11 +180,11 @@ class IncrementalLearner(abc.ABC):
     def build_monitor(self, config, saved_dir, _add_epoch):
         LOGGER.info('Create the monitor.')
         config.monitor.setdefault('kwargs', {}).update(checkpoints_dir=(saved_dir / 'checkpoints'))
-        config.monitor.setdefault('kwargs', {}).update(add_epoch=add_epoch)
+        config.monitor.setdefault('kwargs', {}).update(add_epoch=_add_epoch)
         monitor = _get_instance(src.callbacks.monitor, config.monitor)
         return monitor
 
-    def build_trainer(self, config, dataset, device, train_laoder, valid_loader, net, loss_fns, 
+    def build_trainer(self, config, dataset, device, train_loader, valid_loader, net, loss_fns, 
                     loss_weights, metric_fns, optimizer, lr_scheduler, logger, monitor, meta_data):
         LOGGER.info(f'Create the trainer of the task.')
 
@@ -246,16 +245,16 @@ class IncrementalLearner(abc.ABC):
             LOGGER.info('Resume learning.')
             LOGGER.info(f'current task: {self.current_task + 1}, current classes: {self.current_num_class}')
 
-    def _before_task(self, data_loader):
+    def _before_task(self):
         raise NotImplementedError
 
-    def _train_task(self, train_loader, val_loader):
+    def _train_task(self):
         raise NotImplementedError
 
-    def _after_task(self, data_loader):
+    def _after_task(self):
         raise NotImplementedError
 
-    def _eval_task(self, data_loader):
+    def _eval_task(self):
         raise NotImplementedError
 
     def learn(self):

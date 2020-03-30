@@ -12,12 +12,16 @@ class Accuracy(nn.Module):
         """
         Args:
             output (torch.Tensor) (N, C): The model output.
-            target (torch.LongTensor) (N, 1): The data target.
+            target (torch.LongTensor) (N, C): The data target.
         Returns:
             metric (torch.Tensor) (0): The accuracy.
         """
         pred = output.argmax(dim=1, keepdim=True)
+
         return (pred == target).float().mean()
+
+    def get_name(self):
+        return 'Accuracy'
 
 
 class Dice(nn.Module):

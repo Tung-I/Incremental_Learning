@@ -3,23 +3,20 @@ import torch
 
 from torch import nn
 from src.model.nets import BaseNet
-# from src.model.nets import densenet121
-# from src.model.nets import resnet18
-# from src.model.nets import resnet34
-from src.model.nets import resnet, densenet
-# import src.model.nets.resnet
-# import src.model.nets.densenet
+from src.model.nets import resnet_pytorch as resnet
+from src.model.nets import densenet
+from src.model.nets.resnet import resnet34
 
 class ICaRLNet(BaseNet):
 
-    def __init__(self, convnet_type, use_bias=False, init="kaiming", use_multi_fc=False, device=None):
+    def __init__(self, convnet_type, use_bias=False, init="kaiming", use_multi_fc=False, pretrained=True, device=None):
         super().__init__()
 
         self.use_bias = use_bias
         self.init = init
         self.use_multi_fc = use_multi_fc
-
-        self.convnet = get_convnet(convnet_type, nf=64, zero_init_residual=True)
+        self.pretrained = pretrained
+        self.convnet = resnet34()
         self.classifier = None
         self.n_classes = 0
         self.device = device

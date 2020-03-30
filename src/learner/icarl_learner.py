@@ -1,11 +1,13 @@
 import logging
 import copy
 import json
+import numpy as np
 from torch.nn import functional as F
 from tqdm import tqdm
 from scipy.spatial.distance import cdist
 
 from src.learner import IncrementalLearner
+import src
 
 LOGGER = logging.getLogger(__name__.split('.')[-1])
 
@@ -36,7 +38,7 @@ class ICaRLLearner(IncrementalLearner):
         # update the info for examplar
         self.size_per_class = self.exampler_size // self.current_num_class
 
-    def _train_task(self, trainer):
+    def _train_task(self):
         self.trainer.train()
 
     def _after_task(self):
@@ -44,20 +46,24 @@ class ICaRLLearner(IncrementalLearner):
         self.old_model = self.net.copy().freeze()
 
     def _eval_task(self):
-        ypred, ytrue = compute_ypred_ytrue(self.net, self.test_loader, self._class_means)
-        all_acc = compute_accuracy(ypred, ytrue)
-        output_path = '/home/tony/Desktop/' + str(self.current_task) +'_output.json' 
-        with open(output_path, 'w') as output_json_file:
-            json.dump(all_acc, output_json_file)
+        ypred, ytrue = self.compute_ypred_ytrue(self.net, self.test_loader, self._class_means)
+        # all_acc = self.compute_accuracy(ypred, ytrue)
+        ypred = np.expand_dims(ypred, axis=1)
+        output_path = '/home/tony/Desktop/' + str(self.current_task) +'_pred.npy' 
+        np.save(output_path, ypred)
+        output_path = '/home/tony/Desktop/' + str(self.current_task) +'_target.npy' 
+        np.save(output_path, ytrue)
+        # with open(output_path, 'w') as output_json_file:
+        #     json.dump(to_save, output_json_file)
         
     def build_examplars(self):
         LOGGER.info('Build examplar')
         self._data_memory, self._targets_memory = [], []
-        self._class_means = np.zeros((self.total_num_class, self.net.features_dim()))
+        self._class_means = np.zeros((self.current_num_class, self.net.features_dim))
 
         config = copy.deepcopy(self.config)
 
-        for class_idx in range(self.total_num_class):
+        for class_idx in tqdm(range(self.current_num_class)):
             # dataset
             config.dataset.setdefault('kwargs', {}).update(type_='Training')
             config.dataset.setdefault('kwargs', {}).update(chosen_index=[self.class_order[class_idx]])
@@ -65,16 +71,17 @@ class ICaRLLearner(IncrementalLearner):
             _dataset = _get_instance(src.data.datasets, config.dataset)
             # loader
             config.dataloader.setdefault('kwargs', {}).update(batch_size=1)
-            _loader = _get_instance(src.data.dataloader, config_dataloader, _dataset)
+            _loader = _get_instance(src.data.dataloader, config.dataloader, _dataset)
 
-            features, targets, inputs = extract_features(self.net, _loader)
+            features, targets, inputs = self.extract_features(self.net, _loader)
             #####
             features_flipped = copy.deepcopy(features)
             #####
-            if class_idx >= (self.total_num_class - self.class_per_task):
-                self._herding_matrix.append(select_examplars(features, self.size_per_class))
-
-            examplar_mean, alph = compute_examplar_mean(features, features_flipped, self._herding_matrix[class_idx], self.size_per_class)
+            if class_idx >= (self.current_num_class - self.class_per_task):
+                self._herding_matrix.append(self.select_examplars(features, self.size_per_class))
+            # print(f'{self.current_num_class}, {self.class_per_task}')
+            # print(len(self._herding_matrix))
+            examplar_mean, alph = self.compute_examplar_mean(features, features_flipped, self._herding_matrix[class_idx], self.size_per_class)
             self._data_memory.append(inputs[np.where(alph == 1)[0]])
             self._targets_memory.append(targets[np.where(alph == 1)[0]])
 
@@ -83,7 +90,7 @@ class ICaRLLearner(IncrementalLearner):
         self._data_memory = np.concatenate(self._data_memory)
         self._targets_memory = np.concatenate(self._targets_memory)
 
-    def extract_features(model, loader):
+    def extract_features(self, model, loader):
         targets, features, inputs = [], [], []
         loader_iterator = iter(loader)
         for i in range(len(loader)):
@@ -97,7 +104,7 @@ class ICaRLLearner(IncrementalLearner):
             inputs.append(_inputs.detach().cpu().numpy())
         return np.concatenate(features), np.concatenate(targets), np.concatenate(inputs)
 
-    def select_examplars(features, nb_max):
+    def select_examplars(self, features, nb_max):
         D = features.T
         D = D / (np.linalg.norm(D, axis=0) + EPSILON)
         mu = np.mean(D, axis=1)
@@ -120,7 +127,7 @@ class ICaRLLearner(IncrementalLearner):
 
         return herding_matrix
 
-    def compute_examplar_mean(feat_norm, feat_flip, herding_mat, nb_max):
+    def compute_examplar_mean(self, feat_norm, feat_flip, herding_mat, nb_max):
         D = feat_norm.T
         D = D / (np.linalg.norm(D, axis=0) + EPSILON)
 
@@ -137,8 +144,8 @@ class ICaRLLearner(IncrementalLearner):
 
         return mean, alph
 
-    def compute_ypred_ytrue(model, loader, class_means):
-        features, targets_ = extract_features(model, loader)
+    def compute_ypred_ytrue(self, model, loader, class_means):
+        features, targets_, _ = self.extract_features(model, loader)
 
         targets = np.zeros((targets_.shape[0], 100), np.float32)
         targets[range(len(targets_)), targets_.astype('int32')] = 1.
@@ -150,7 +157,7 @@ class ICaRLLearner(IncrementalLearner):
 
         return np.argsort(score_icarl, axis=1)[:, -1], targets_
 
-    def compute_accuracy(ypred, ytrue):
+    def compute_accuracy(self, ypred, ytrue):
         task_size = self.class_per_task
         all_acc = {}
 

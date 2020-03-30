@@ -41,7 +41,7 @@ class BaseTrainer:
         self.valid_dataloader = valid_dataloader
         self.net = net
         self.loss_fns = loss_fns
-        self.loss_weights = loss_weights
+        self.loss_weights = torch.tensor(loss_weights, dtype=torch.float, device=device)
         self.metric_fns = metric_fns
         self.optimizer = optimizer
 
